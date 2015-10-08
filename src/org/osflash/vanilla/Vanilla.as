@@ -1,32 +1,35 @@
 package org.osflash.vanilla
 {
-	import flash.utils.Dictionary;
-	import org.as3commons.lang.ClassUtils;
-	import org.as3commons.lang.ObjectUtils;
-	import org.as3commons.reflect.Accessor;
-	import org.as3commons.reflect.Field;
-	import org.as3commons.reflect.Metadata;
-	import org.as3commons.reflect.MetadataArgument;
-	import org.as3commons.reflect.Method;
-	import org.as3commons.reflect.Parameter;
-	import org.as3commons.reflect.Type;
-	import org.as3commons.reflect.Variable;
+    import flash.utils.Dictionary;
+    import flash.utils.getQualifiedClassName;
 
-	import flash.utils.getQualifiedClassName;
-	
-	public class Vanilla
+    import mx.collections.ArrayCollection;
+    import mx.collections.ArrayList;
+
+    import org.as3commons.lang.ClassUtils;
+    import org.as3commons.lang.ObjectUtils;
+    import org.as3commons.reflect.Accessor;
+    import org.as3commons.reflect.Field;
+    import org.as3commons.reflect.Metadata;
+    import org.as3commons.reflect.MetadataArgument;
+    import org.as3commons.reflect.Method;
+    import org.as3commons.reflect.Parameter;
+    import org.as3commons.reflect.Type;
+    import org.as3commons.reflect.Variable;
+
+    public class Vanilla
 	{
 		private static const METADATA_TAG : String = "Marshall";
 		private static const METADATA_FIELD_KEY : String = "field";
 		private static const METADATA_TYPE_KEY : String = "type";
-		
+
 		//Cache InjectionMap instances
 		private var injectionMapCache : Dictionary = new Dictionary();
-		
+
 		/**
 		 * Attempts to extract properties from the supplied source object into an instance of the supplied targetType.
-		 * 
-		 * @param source		Object which contains properties that you wish to transfer to a new instance of the 
+		 *
+		 * @param source		Object which contains properties that you wish to transfer to a new instance of the
 		 * 						supplied targetType Class.
 		 * @param targetType	The target Class of which an instance will be returned.
 		 * @return				An instance of the supplied targetType containing all the properties extracted from
@@ -39,20 +42,20 @@ package org.osflash.vanilla
 			if (source is targetType) {
 				return source;
 			}
-			
-			if (!injectionMapCache[targetType]) 
+
+			if (!injectionMapCache[targetType])
 			{
 			    injectionMapCache[targetType] = new InjectionMap();
 			    addReflectedRules(injectionMapCache[targetType], targetType, Type.forClass(targetType));
 			}
-			
+
 			const injectionMap : InjectionMap = injectionMapCache[targetType];
-			
+
 			// Create a new instance of the targetType; and then inject the values from the source object into it
 			const target : * = instantiate(targetType, fetchConstructorArgs(source, injectionMap.getConstructorFields()));
 			injectFields(source, target, injectionMap);
 			injectMethods(source, target, injectionMap);
-			
+
 			return target;
 		}
 
@@ -72,7 +75,7 @@ package org.osflash.vanilla
 				target[fieldName] = extractValue(source, injectionMap.getField(fieldName));
 			}
 		}
-		
+
 		private function injectMethods(source : Object, target : *, injectionMap : InjectionMap) : void
 		{
 			const methodNames : Array = injectionMap.getMethodsNames();
@@ -89,35 +92,43 @@ package org.osflash.vanilla
 		private function extractValue(source : Object, injectionDetail : InjectionDetail) : *
 		{
 			var value : * = source[injectionDetail.name];
-			
+
 			// Is this a required injection?
 			if (injectionDetail.isRequired && value === undefined) {
 				throw new MarshallingError("Required value " + injectionDetail + " does not exist in the source object.", MarshallingError.MISSING_REQUIRED_FIELD);
 			}
-			
-			if (value) 
+
+			if (value)
 			{
 				// automatically coerce simple types.
 				if (!ObjectUtils.isSimple(value)) {
 					value = extract(value, injectionDetail.type);
 				}
-				
+
 				// Collections are harder, we need to coerce the contents.
 				else if (value is Array) {
 					if(isVector(injectionDetail.type)) {
 						value = extractVector(value, injectionDetail.type, injectionDetail.arrayTypeHint);
 					}
 					else if (injectionDetail.arrayTypeHint) {
-						value = extractTypedArray(value, injectionDetail.arrayTypeHint);
-					}					
+                        if (injectionDetail.type == ArrayCollection) {
+                            value = new ArrayCollection(extractTypedArray(value, injectionDetail.arrayTypeHint));
+                        }
+                        else if (injectionDetail.type == ArrayList){
+                            value = new ArrayList(extractTypedArray(value, injectionDetail.arrayTypeHint));
+                        }
+                        else {
+                            value = extractTypedArray(value, injectionDetail.arrayTypeHint);
+                        }
+					}
 				}
-				
+
 				// refuse to allow any automatic coercing to occur.
 				if (!(value is injectionDetail.type)) {
 					throw new MarshallingError("Could not coerce `" + injectionDetail.name + "` (value: " + value + " <" + Type.forInstance(value).clazz + "]>) from source object to " + injectionDetail.type + " on target object", MarshallingError.TYPE_MISMATCH);
 				}
 			}
-			
+
 			return value;
 		}
 
@@ -143,7 +154,7 @@ package org.osflash.vanilla
 			}
 			return result;
 		}
-		
+
 
 		private function instantiate(targetType : Class, ctorArgs : Array) : *
 		{
@@ -163,10 +174,10 @@ package org.osflash.vanilla
 			if (!clazzMarshallingMetadata) {
 				return;
 			}
-			
+
 			const marshallingMetadata : Metadata = clazzMarshallingMetadata[0];
 			const numArgs : uint = marshallingMetadata.arguments.length;
-			
+
 			for (var i : uint = 0; i < numArgs; i++) {
 				var argument : MetadataArgument = marshallingMetadata.arguments[i];
 				if (argument.key == METADATA_FIELD_KEY) {
@@ -181,11 +192,11 @@ package org.osflash.vanilla
 		{
 			for each (var field : Field in fields) {
 				if (!field.hasMetadata(Metadata.TRANSIENT) && canAccess(field)) {
-                    			const fieldMetadataEntries : Array = field.getMetadata(METADATA_TAG);
+                    const fieldMetadataEntries : Array = field.getMetadata(METADATA_TAG);
 					const fieldMetadata : Metadata = (fieldMetadataEntries) ? fieldMetadataEntries[0] : null;
 					const arrayTypeHint : Class = extractArrayTypeHint(field.type, fieldMetadata);
 					const sourceFieldName : String = extractFieldName(field, fieldMetadata);
-					
+
 					injectionMap.addField(field.name, new InjectionDetail(sourceFieldName, field.type.clazz, false, arrayTypeHint));
 				}
 			}
@@ -199,10 +210,10 @@ package org.osflash.vanilla
 				if (methodMarshallingMetadata == null) {
 					continue;
 				}
-				
+
 				const metadata : Metadata = methodMarshallingMetadata[0];
 				const numArgs : uint = metadata.arguments.length;
-				
+
 				for (var i : uint = 0; i < numArgs; i++) {
 					var argument : MetadataArgument = metadata.arguments[i];
 					if (argument.key == METADATA_FIELD_KEY) {
@@ -212,7 +223,7 @@ package org.osflash.vanilla
 					}
 				}
 			}
-		}		
+		}
 
 		private function extractFieldName(field : Field, metadata : Metadata) : String
 		{
@@ -226,7 +237,7 @@ package org.osflash.vanilla
 					}
 				}
 			}
-			
+
 			// Assume it's a 1 to 1 mapping.
 			return field.name;
 		}
@@ -237,7 +248,7 @@ package org.osflash.vanilla
 			if (type.parameters && type.parameters[0] is Class) {
 				return type.parameters[0];
 			}
-			
+
 			// Otherwise we will look for some "type" metadata, if it was defined.
 			else if (metadata) {
 				const numArgs : uint = metadata.arguments.length;
@@ -249,10 +260,10 @@ package org.osflash.vanilla
 					}
 				}
 			}
-			
+
 			// No type hint.
 			return null;
-		}		
+		}
 
 		private function canAccess(field : Field) : Boolean
 		{
@@ -264,8 +275,8 @@ package org.osflash.vanilla
 			}
 			return false;
 		}
-		
-		private function isVector(obj : *) : Boolean 
+
+		private function isVector(obj : *) : Boolean
 		{
 			return (getQualifiedClassName(obj).indexOf('__AS3__.vec::Vector') == 0);
 		}
